@@ -1,56 +1,53 @@
 import customtkinter as ctk
-import sqlite3
-import os
-
-DB_FILE = "voting_system.db"
+from database import (
+    init_database, db_cast_vote, db_get_results, db_get_voters, db_reset_system
+)
 
 class VotingSystem(ctk.CTk):
     def __init__(self):
         super().__init__()
 
-        self.title("Modern Voting System V 2.1 - Admin Audit")
-        self.geometry("650x850")
+        self.title("Modern Voting System V 2.3 - Secured SQL")
+        self.geometry("600x700")
         self.resizable(False, False)
 
         self.admin_password = "admin123"
         self.color_accent = "#33ff33"
+        self.is_admin_authenticated = False
 
-        self.init_database()
+        init_database()
 
         ctk.set_appearance_mode("dark")
         self.setup_ui()
         self.update_results()
 
-    def init_database(self):
-        conn = sqlite3.connect(DB_FILE)
-        cursor = conn.cursor()
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS candidates (
-                name TEXT PRIMARY KEY,
-                votes INTEGER DEFAULT 0
-            )
-        ''')
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS voters (
-                voter_id TEXT PRIMARY KEY
-            )
-        ''')
-        cursor.execute("SELECT COUNT(*) FROM candidates")
-        if cursor.fetchone()[0] == 0:
-            initial_data = [("Python", 0), ("JavaScript", 0), ("Golang", 0), ("C++", 0)]
-            cursor.execSubmitedmany = cursor.executemany("INSERT INTO candidates VALUES (?, ?)", initial_data)
-        conn.commit()
-        conn.close()
-
     def setup_ui(self):
-        self.main_frame = ctk.CTkFrame(self, corner_radius=20, border_width=2, border_color=self.color_accent)
-        self.main_frame.pack(pady=20, padx=20, fill="both", expand=True)
+        self.scroll_container = ctk.CTkScrollableFrame(self, fg_color="transparent", corner_radius=0)
+        self.scroll_container.pack(fill="both", expand=True, padx=10, pady=10)
+
+        self.main_frame = ctk.CTkFrame(self.scroll_container, corner_radius=20, border_width=2,
+                                       border_color=self.color_accent)
+        self.main_frame.pack(pady=10, padx=10, fill="both", expand=True)
 
         ctk.CTkLabel(self.main_frame, text="VOTE YOUR LANGUAGE",
                      font=("Bahnschrift", 28, "bold"), text_color=self.color_accent).pack(pady=15)
 
+        self.admin_btn_frame = ctk.CTkFrame(self.main_frame, fg_color="#1a1a1a", corner_radius=10)
+        self.admin_btn_frame.pack(pady=10, padx=40, fill="x")
+
+        ctk.CTkLabel(self.admin_btn_frame, text="Admin:", font=("Bahnschrift", 12, "bold"),
+                     text_color="gray").pack(side="left", padx=15, pady=10)
+
+        self.btn_view_log = ctk.CTkButton(self.admin_btn_frame, text="🔐 View Logs", fg_color="#3b3b3b", width=120,
+                                          command=lambda: self.request_admin_access("VIEW_LOGS"))
+        self.btn_view_log.pack(side="left", padx=5, pady=10)
+
+        self.btn_reset = ctk.CTkButton(self.admin_btn_frame, text="🗑️ Reset DB", fg_color="#ff3333", text_color="black",
+                                       font=("Bahnschrift", 12, "bold"), width=120,
+                                       command=lambda: self.request_admin_access("RESET_DB"))
+
         self.id_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
-        self.id_frame.pack(pady=10)
+        self.id_frame.pack(pady=15)
         ctk.CTkLabel(self.id_frame, text="Enter Voter ID (NIM):", font=("Bahnschrift", 14)).pack(side="left", padx=10)
         self.entry_voter_id = ctk.CTkEntry(self.id_frame, placeholder_text="ID / NIM Number", width=180)
         self.entry_voter_id.pack(side="left")
@@ -65,6 +62,7 @@ class VotingSystem(ctk.CTk):
             btn.pack(pady=4)
             self.vote_buttons[lang] = btn
 
+        # Progress Bar Hasil Suara
         self.results_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
         self.results_frame.pack(pady=10, fill="x", padx=40)
 
@@ -89,20 +87,12 @@ class VotingSystem(ctk.CTk):
                                          font=("Bahnschrift", 14), text_color="gray")
         self.status_label.pack(pady=5)
 
-        ctk.CTkLabel(self.main_frame, text="--- Admin Audit Log ---", font=("Bahnschrift", 12), text_color="gray").pack(pady=(10,0))
-        self.log_box = ctk.CTkTextbox(self.main_frame, width=400, height=100, font=("Consolas", 12))
+        ctk.CTkLabel(self.main_frame, text="--- Admin Audit Log ---", font=("Bahnschrift", 12), text_color="gray").pack(
+            pady=(10, 0))
+        self.log_box = ctk.CTkTextbox(self.main_frame, width=400, height=70, font=("Consolas", 12))
         self.log_box.pack(pady=5)
-        self.log_box.insert("0.0", "Lock icon. Authenticate as admin to view voter logs.")
+        self.log_box.insert("0.0", "🔒 Authenticate as admin via 'View Logs' button to unlock.")
         self.log_box.configure(state="disabled")
-
-        self.admin_btn_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
-        self.admin_btn_frame.pack(pady=10, side="bottom")
-
-        self.btn_view_log = ctk.CTkButton(self.admin_btn_frame, text="🔐 View Logs", fg_color="#3b3b3b", command=self.admin_view_logs)
-        self.btn_view_log.pack(side="left", padx=5)
-
-        self.btn_reset = ctk.CTkButton(self.admin_btn_frame, text="🗑️ Reset DB", fg_color="#ff3333", text_color="black", font=("Bahnschrift", 14, "bold"), command=self.admin_reset)
-        self.btn_reset.pack(side="left", padx=5)
 
     def cast_vote(self, lang):
         voter_id = self.entry_voter_id.get().strip()
@@ -110,33 +100,20 @@ class VotingSystem(ctk.CTk):
             self.status_label.configure(text="⚠️ Error: Please enter your Voter ID first!", text_color="#ffcc00")
             return
 
-        conn = sqlite3.connect(DB_FILE)
-        cursor = conn.cursor()
+        result = db_cast_vote(voter_id, lang)
 
-        cursor.execute("SELECT * FROM voters WHERE voter_id = ?", (voter_id,))
-        if cursor.fetchone() is not None:
-            self.status_label.configure(text=f"❌ ID '{voter_id}' has already voted!", text_color="#ff3333")
-            conn.close()
-            return
-
-        try:
-            cursor.execute("INSERT INTO voters VALUES (?)", (voter_id,))
-            cursor.execute("UPDATE candidates SET votes = votes + 1 WHERE name = ?", (lang,))
-            conn.commit()
+        if result == "SUCCESS":
             self.status_label.configure(text=f"✅ Vote successfully cast for {lang}!", text_color=self.color_accent)
             self.entry_voter_id.delete(0, 'end')
-        except sqlite3.Error as e:
-            self.status_label.configure(text=f"⚠️ Database Error: {e}", text_color="#ff3333")
-        finally:
-            conn.close()
+        elif result == "ALREADY_VOTED":
+            self.status_label.configure(text=f"❌ ID '{voter_id}' has already voted!", text_color="#ff3333")
+        else:
+            self.status_label.configure(text=f"⚠️ {result}", text_color="#ff3333")
 
         self.update_results()
 
     def update_results(self):
-        conn = sqlite3.connect(DB_FILE)
-        cursor = conn.cursor()
-        cursor.execute("SELECT name, votes FROM candidates")
-        data = dict(cursor.fetchall())
+        data = db_get_results()
         total_votes = sum(data.values())
 
         for lang, count in data.items():
@@ -144,63 +121,79 @@ class VotingSystem(ctk.CTk):
                 self.result_labels[lang].configure(text=f"{lang}: {count}")
                 percentage = count / total_votes if total_votes > 0 else 0
                 self.result_bars[lang].set(percentage)
-        conn.close()
 
-    def admin_view_logs(self):
-        dialog = ctk.CTkInputDialog(text="Enter Admin Password to View Logs:", title="Admin Authentication")
-        input_password = dialog.get_input()
+    def request_admin_access(self, action_type):
+        self.login_win = ctk.CTkToplevel(self)
+        self.login_win.title("Admin Authentication Required")
+        self.login_win.geometry("380x220")
+        self.login_win.resizable(False, False)
+        self.login_win.lift()
+        self.login_win.focus_force()
+        self.login_win.grab_set()
 
-        if input_password == self.admin_password:
-            conn = sqlite3.connect(DB_FILE)
-            cursor = conn.cursor()
+        msg = "Enter Admin Password to Reset System:" if action_type == "RESET_DB" else "Enter Admin Password to View Logs:"
+        ctk.CTkLabel(self.login_win, text=msg, font=("Bahnschrift", 13, "bold"),
+                     text_color="#ffcc00" if action_type == "RESET_DB" else "white").pack(pady=15)
 
-            # Mengambil daftar ID dari tabel voters (Data Query)
-            cursor.execute("SELECT voter_id FROM voters")
-            voters_list = cursor.fetchall()
-            conn.close()
+        pass_entry = ctk.CTkEntry(self.login_win, placeholder_text="Password", show="*", width=200, justify="center")
+        pass_entry.pack(pady=5)
+        pass_entry.focus()
 
-            self.log_box.configure(state="normal")
-            self.log_box.delete("0.0", "end")
+        pass_entry.bind("<Return>", lambda e: self.validate_admin_password(pass_entry.get(), action_type))
 
-            if voters_list:
-                self.log_box.insert("0.0", f"--- TOTAL VOTERS LOG ({len(voters_list)}) ---\n")
-                for idx, voter in enumerate(voters_list, 1):
-                    self.log_box.insert("end", f"{idx}. Voter ID: {voter[0]}\n")
-            else:
-                self.log_box.insert("0.0", "No data available. Database is empty.")
+        btn_submit = ctk.CTkButton(self.login_win, text="Confirm", fg_color=self.color_accent, text_color="black",
+                                   font=("Bahnschrift", 12, "bold"),
+                                   command=lambda: self.validate_admin_password(pass_entry.get(), action_type))
+        btn_submit.pack(pady=15)
 
-            self.log_box.configure(state="disabled")
-            self.status_label.configure(text="✅ Logs loaded successfully!", text_color=self.color_accent)
-        elif input_password is None:
-            pass
+    def validate_admin_password(self, password, action_type):
+        if password == self.admin_password:
+            self.login_win.destroy()
+
+            # Berhasil masuk mode admin
+            self.is_admin_authenticated = True
+            # Munculkan tombol reset merah hanya setelah login admin berhasil
+            self.btn_reset.pack(side="left", padx=5, pady=10)
+
+            if action_type == "VIEW_LOGS":
+                self.execute_admin_view_logs()
+            elif action_type == "RESET_DB":
+                self.execute_admin_reset()
         else:
-            self.status_label.configure(text="⚠️ Wrong Admin Password!", text_color="#ff3333")
+            self.status_label.configure(text="⚠️ Access Denied: Incorrect Admin Password!", text_color="#ff3333")
+            self.login_win.destroy()
 
-    def admin_reset(self):
-        dialog = ctk.CTkInputDialog(text="Enter Admin Password to Reset System:", title="Admin Authentication")
-        input_password = dialog.get_input()
+    def execute_admin_view_logs(self):
+        voters_list = db_get_voters()
 
-        if input_password == self.admin_password:
-            conn = sqlite3.connect(DB_FILE)
-            cursor = conn.cursor()
-            cursor.execute("UPDATE candidates SET votes = 0")
-            cursor.execute("DELETE FROM voters")
-            conn.commit()
-            conn.close()
+        self.log_box.configure(state="normal")
+        self.log_box.delete("0.0", "end")
 
-            self.update_results()
-
-            self.log_box.configure(state="normal")
-            self.log_box.delete("0.0", "end")
-            self.log_box.insert("0.0", "Database cleared. No logs to show.")
-            self.log_box.configure(state="disabled")
-
-            self.status_label.configure(text="🔄 Database Reset Successful!", text_color="#3399ff")
-        elif input_password is None:
-            pass
+        if voters_list:
+            self.log_box.insert("0.0", f"--- TOTAL VOTERS LOG ({len(voters_list)}) ---\n")
+            for idx, voter_id in enumerate(voters_list, 1):
+                self.log_box.insert("end", f"{idx}. Voter ID: {voter_id}\n")
         else:
-            self.status_label.configure(text="⚠️ Wrong Admin Password!", text_color="#ff3333")
+            self.log_box.insert("0.0", "No data available. Database is empty.")
+
+        self.log_box.configure(state="disabled")
+        self.status_label.configure(text="✅ Logs loaded successfully!", text_color=self.color_accent)
+
+    def execute_admin_reset(self):
+        db_reset_system()
+        self.update_results()
+
+        self.log_box.configure(state="normal")
+        self.log_box.delete("0.0", "end")
+        self.log_box.insert("0.0", "Database cleared. No logs to show.")
+        self.log_box.configure(state="disabled")
+
+        self.btn_reset.pack_forget()
+        self.is_admin_authenticated = False
+
+        self.status_label.configure(text="🔄 Database Reset Successful!", text_color="#3399ff")
+
 
 if __name__ == "__main__":
-    app = VotingSystem()
-    app.mainloop()
+    VotingSystem().mainloop()
+
