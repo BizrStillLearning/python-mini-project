@@ -1,13 +1,18 @@
 import customtkinter as ctk
-from database import (
+import re
+import csv
+from datetime import datetime
+from tkinter import filedialog
+from database.db_config import (
     init_database, db_cast_vote, db_get_results, db_get_voters, db_reset_system
 )
+
 
 class VotingSystem(ctk.CTk):
     def __init__(self):
         super().__init__()
 
-        self.title("Modern Voting System V 2.3 - Secured SQL")
+        self.title("Modern Voting System V 2.5 - Enterprise Audit Edition")
         self.geometry("600x700")
         self.resizable(False, False)
 
@@ -38,18 +43,21 @@ class VotingSystem(ctk.CTk):
         ctk.CTkLabel(self.admin_btn_frame, text="Admin:", font=("Bahnschrift", 12, "bold"),
                      text_color="gray").pack(side="left", padx=15, pady=10)
 
-        self.btn_view_log = ctk.CTkButton(self.admin_btn_frame, text="🔐 View Logs", fg_color="#3b3b3b", width=120,
+        self.btn_view_log = ctk.CTkButton(self.admin_btn_frame, text="🔐 View Logs", fg_color="#3b3b3b", width=100,
                                           command=lambda: self.request_admin_access("VIEW_LOGS"))
         self.btn_view_log.pack(side="left", padx=5, pady=10)
 
+        self.btn_export = ctk.CTkButton(self.admin_btn_frame, text="📥 Export CSV", fg_color="#3a7ebf", width=100,
+                                        command=self.execute_admin_export)
+
         self.btn_reset = ctk.CTkButton(self.admin_btn_frame, text="🗑️ Reset DB", fg_color="#ff3333", text_color="black",
-                                       font=("Bahnschrift", 12, "bold"), width=120,
+                                       font=("Bahnschrift", 12, "bold"), width=100,
                                        command=lambda: self.request_admin_access("RESET_DB"))
 
         self.id_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
         self.id_frame.pack(pady=15)
         ctk.CTkLabel(self.id_frame, text="Enter Voter ID (NIM):", font=("Bahnschrift", 14)).pack(side="left", padx=10)
-        self.entry_voter_id = ctk.CTkEntry(self.id_frame, placeholder_text="ID / NIM Number", width=180)
+        self.entry_voter_id = ctk.CTkEntry(self.id_frame, placeholder_text="e.g., 20251337037", width=180)
         self.entry_voter_id.pack(side="left")
 
         self.options_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
@@ -62,7 +70,6 @@ class VotingSystem(ctk.CTk):
             btn.pack(pady=4)
             self.vote_buttons[lang] = btn
 
-        # Progress Bar Hasil Suara
         self.results_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
         self.results_frame.pack(pady=10, fill="x", padx=40)
 
@@ -83,21 +90,23 @@ class VotingSystem(ctk.CTk):
             self.result_labels[lang] = lbl
             self.result_bars[lang] = bar
 
-        self.status_label = ctk.CTkLabel(self.main_frame, text="Please enter your ID and cast your vote!",
+        self.status_label = ctk.CTkLabel(self.main_frame, text="Please enter your strictly numeric NIM!",
                                          font=("Bahnschrift", 14), text_color="gray")
         self.status_label.pack(pady=5)
 
-        ctk.CTkLabel(self.main_frame, text="--- Admin Audit Log ---", font=("Bahnschrift", 12), text_color="gray").pack(
+        ctk.CTkLabel(self.main_frame, text="--- Encrypted Audit Log ---", font=("Bahnschrift", 12),
+                     text_color="gray").pack(
             pady=(10, 0))
         self.log_box = ctk.CTkTextbox(self.main_frame, width=400, height=70, font=("Consolas", 12))
         self.log_box.pack(pady=5)
-        self.log_box.insert("0.0", "🔒 Authenticate as admin via 'View Logs' button to unlock.")
+        self.log_box.insert("0.0", "🔒 Logs are encrypted (SHA-256). Admin login required.")
         self.log_box.configure(state="disabled")
 
     def cast_vote(self, lang):
         voter_id = self.entry_voter_id.get().strip()
-        if not voter_id:
-            self.status_label.configure(text="⚠️ Error: Please enter your Voter ID first!", text_color="#ffcc00")
+
+        if not re.match(r"^\d{7,15}$", voter_id):
+            self.status_label.configure(text="⚠️ Error: NIM must be 7-15 numeric digits!", text_color="#ffcc00")
             return
 
         result = db_cast_vote(voter_id, lang)
@@ -106,7 +115,7 @@ class VotingSystem(ctk.CTk):
             self.status_label.configure(text=f"✅ Vote successfully cast for {lang}!", text_color=self.color_accent)
             self.entry_voter_id.delete(0, 'end')
         elif result == "ALREADY_VOTED":
-            self.status_label.configure(text=f"❌ ID '{voter_id}' has already voted!", text_color="#ff3333")
+            self.status_label.configure(text=f"❌ NIM '{voter_id}' has already voted!", text_color="#ff3333")
         else:
             self.status_label.configure(text=f"⚠️ {result}", text_color="#ff3333")
 
@@ -150,9 +159,10 @@ class VotingSystem(ctk.CTk):
         if password == self.admin_password:
             self.login_win.destroy()
 
-            # Berhasil masuk mode admin
             self.is_admin_authenticated = True
-            # Munculkan tombol reset merah hanya setelah login admin berhasil
+
+            # Memunculkan tombol Export & Reset setelah login berhasil
+            self.btn_export.pack(side="left", padx=5, pady=10)
             self.btn_reset.pack(side="left", padx=5, pady=10)
 
             if action_type == "VIEW_LOGS":
@@ -170,14 +180,52 @@ class VotingSystem(ctk.CTk):
         self.log_box.delete("0.0", "end")
 
         if voters_list:
-            self.log_box.insert("0.0", f"--- TOTAL VOTERS LOG ({len(voters_list)}) ---\n")
-            for idx, voter_id in enumerate(voters_list, 1):
-                self.log_box.insert("end", f"{idx}. Voter ID: {voter_id}\n")
+            self.log_box.insert("0.0", f"--- SECURE HASH LOG ({len(voters_list)} Voters) ---\n")
+            for idx, voter_hash in enumerate(voters_list, 1):
+                short_hash = voter_hash[:16] + "..."
+                self.log_box.insert("end", f"{idx}. Hash: {short_hash}\n")
         else:
             self.log_box.insert("0.0", "No data available. Database is empty.")
 
         self.log_box.configure(state="disabled")
-        self.status_label.configure(text="✅ Logs loaded successfully!", text_color=self.color_accent)
+        self.status_label.configure(text="✅ Secure logs loaded successfully!", text_color=self.color_accent)
+
+    def execute_admin_export(self):
+        file_path = filedialog.asksaveasfilename(
+            defaultextension=".csv",
+            filetypes=[("CSV Document", "*.csv")],
+            title="Save Audit Log As"
+        )
+
+        if not file_path:
+            return
+
+        try:
+            results = db_get_results()
+            voters = db_get_voters()
+
+            with open(file_path, mode='w', newline='') as file:
+                writer = csv.writer(file)
+
+                writer.writerow(["--- VOTING SYSTEM AUDIT REPORT ---"])
+                writer.writerow(["Generated on:", datetime.now().strftime("%Y-%m-%d %H:%M:%S")])
+                writer.writerow([])
+
+                writer.writerow(["1. AGGREGATE RESULTS"])
+                writer.writerow(["Candidate", "Total Votes"])
+                for candidate, votes in results.items():
+                    writer.writerow([candidate, votes])
+
+                writer.writerow([])
+
+                writer.writerow(["2. SECURE VOTER HASH LOG (SHA-256)"])
+                writer.writerow(["No.", "Encrypted Voter ID"])
+                for idx, v_hash in enumerate(voters, 1):
+                    writer.writerow([idx, v_hash])
+
+            self.status_label.configure(text=f"✅ Data successfully exported to CSV!", text_color=self.color_accent)
+        except Exception as e:
+            self.status_label.configure(text=f"⚠️ Export failed: {e}", text_color="#ff3333")
 
     def execute_admin_reset(self):
         db_reset_system()
@@ -188,6 +236,7 @@ class VotingSystem(ctk.CTk):
         self.log_box.insert("0.0", "Database cleared. No logs to show.")
         self.log_box.configure(state="disabled")
 
+        self.btn_export.pack_forget()
         self.btn_reset.pack_forget()
         self.is_admin_authenticated = False
 

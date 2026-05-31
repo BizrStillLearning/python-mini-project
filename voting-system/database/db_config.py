@@ -1,11 +1,16 @@
 import sqlite3
 import os
+import hashlib
 
 DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "voting_system.db")
 
 
 def get_connection():
     return sqlite3.connect(DB_PATH)
+
+
+def hash_voter_id(raw_id):
+    return hashlib.sha256(raw_id.encode('utf-8')).hexdigest()
 
 
 def init_database():
@@ -49,12 +54,14 @@ def db_cast_vote(voter_id, lang):
     conn = get_connection()
     cursor = conn.cursor()
 
+    secure_hash = hash_voter_id(voter_id)
+
     try:
-        cursor.execute("SELECT * FROM voters WHERE voter_id = ?", (voter_id,))
+        cursor.execute("SELECT * FROM voters WHERE voter_id = ?", (secure_hash,))
         if cursor.fetchone() is not None:
             return "ALREADY_VOTED"
 
-        cursor.execute("INSERT INTO voters VALUES (?)", (voter_id,))
+        cursor.execute("INSERT INTO voters VALUES (?)", (secure_hash,))
         cursor.execute("UPDATE candidates SET votes = votes + 1 WHERE name = ?", (lang,))
         conn.commit()
         return "SUCCESS"
